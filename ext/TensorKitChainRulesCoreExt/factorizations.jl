@@ -190,7 +190,8 @@ end
 function svd_pullback!(ΔA::AbstractMatrix, U::AbstractMatrix, S::AbstractVector,
                        Vd::AbstractMatrix, ΔU, ΔS, ΔVd;
                        tol::Real=default_pullback_gaugetol(S))
-
+    vtol = tol * norm(S, Inf)
+    gtol = tol * max(norm(S, Inf), one(norm(S, Inf)))
     # Basic size checks and determination
     m, n = size(U, 1), size(Vd, 2)
     size(U, 2) == size(Vd, 1) == length(S) == min(m, n) || throw(DimensionMismatch())
@@ -219,7 +220,7 @@ function svd_pullback!(ΔA::AbstractMatrix, U::AbstractMatrix, S::AbstractVector
     Sp = view(S, 1:p)
 
     # rank
-    r = searchsortedlast(S, tol; rev=true)
+    r = searchsortedlast(S, vtol; rev=true)
 
     # compute antihermitian part of projection of ΔU and ΔV onto U and V
     # also already subtract this projection from ΔU and ΔV
@@ -243,18 +244,18 @@ function svd_pullback!(ΔA::AbstractMatrix, U::AbstractMatrix, S::AbstractVector
     end
 
     # check whether cotangents arise from gauge-invariance objective function
-    mask = abs.(Sp' .- Sp) .< tol
+    mask = abs.(Sp' .- Sp) .< vtol
     Δgauge = norm(view(aUΔU, mask) + view(aVΔV, mask), Inf)
     if p > r
         rprange = (r + 1):p
         Δgauge = max(Δgauge, norm(view(aUΔU, rprange, rprange), Inf))
         Δgauge = max(Δgauge, norm(view(aVΔV, rprange, rprange), Inf))
     end
-    Δgauge < tol ||
+    Δgauge < gtol ||
         @warn "`svd` cotangents sensitive to gauge choice: (|Δgauge| = $Δgauge)"
 
-    UdΔAV = (aUΔU .+ aVΔV) .* safe_inv.(Sp' .- Sp, tol) .+
-            (aUΔU .- aVΔV) .* safe_inv.(Sp' .+ Sp, tol)
+    UdΔAV = (aUΔU .+ aVΔV) .* safe_inv.(Sp' .- Sp, vtol) .+
+            (aUΔU .- aVΔV) .* safe_inv.(Sp' .+ Sp, vtol)
     if !(ΔS isa ZeroTangent)
         UdΔAV[diagind(UdΔAV)] .+= real.(ΔS)
         # in principle, ΔS is real, but maybe not if coming from an anyonic tensor
@@ -283,10 +284,10 @@ function svd_pullback!(ΔA::AbstractMatrix, U::AbstractMatrix, S::AbstractVector
             VrΔV = fill!(similar(Vd, (r - p, p)), 0)
         end
 
-        X = (1 // 2) .* ((UrΔU .+ VrΔV) .* safe_inv.(Sp' .- Sr, tol) .+
-                         (UrΔU .- VrΔV) .* safe_inv.(Sp' .+ Sr, tol))
-        Y = (1 // 2) .* ((UrΔU .+ VrΔV) .* safe_inv.(Sp' .- Sr, tol) .-
-                         (UrΔU .- VrΔV) .* safe_inv.(Sp' .+ Sr, tol))
+        X = (1 // 2) .* ((UrΔU .+ VrΔV) .* safe_inv.(Sp' .- Sr, vtol) .+
+                         (UrΔU .- VrΔV) .* safe_inv.(Sp' .+ Sr, vtol))
+        Y = (1 // 2) .* ((UrΔU .+ VrΔV) .* safe_inv.(Sp' .- Sr, vtol) .-
+                         (UrΔU .- VrΔV) .* safe_inv.(Sp' .+ Sr, vtol))
 
         # ΔA += Ur * X * Vp' + Up * Y' * Vr'
         mul!(ΔA, Ur, X * Vp', 1, 1)
@@ -294,19 +295,20 @@ function svd_pullback!(ΔA::AbstractMatrix, U::AbstractMatrix, S::AbstractVector
     end
 
     if m > max(r, p) && !(ΔU isa AbstractZero) # remaining ΔU is already orthogonal to U[:,1:max(p,r)]
-        # ΔA += (ΔU .* safe_inv.(Sp', tol)) * Vp'
-        mul!(ΔA, ΔU .* safe_inv.(Sp', tol), Vp', 1, 1)
+        # ΔA += (ΔU .* safe_inv.(Sp', vtol)) * Vp'
+        mul!(ΔA, ΔU .* safe_inv.(Sp', vtol), Vp', 1, 1)
     end
     if n > max(r, p) && !(ΔVd isa AbstractZero) # remaining ΔV is already orthogonal to V[:,1:max(p,r)]
-        # ΔA += U * (safe_inv.(Sp, tol) .* ΔVd)
-        mul!(ΔA, Up, safe_inv.(Sp, tol) .* ΔVd, 1, 1)
+        # ΔA += U * (safe_inv.(Sp, vtol) .* ΔVd)
+        mul!(ΔA, Up, safe_inv.(Sp, vtol) .* ΔVd, 1, 1)
     end
     return ΔA
 end
 
 function eig_pullback!(ΔA::AbstractMatrix, D::AbstractVector, V::AbstractMatrix, ΔD, ΔV;
                        tol::Real=default_pullback_gaugetol(D))
-
+    vtol = tol * norm(D, Inf)
+    gtol = tol * max(norm(D, Inf), one(norm(D, Inf)))
     # Basic size checks and determination
     n = LinearAlgebra.checksquare(V)
     n == length(D) || throw(DimensionMismatch())
@@ -314,12 +316,12 @@ function eig_pullback!(ΔA::AbstractMatrix, D::AbstractVector, V::AbstractMatrix
     if !(ΔV isa AbstractZero)
         VdΔV = V' * ΔV
 
-        mask = abs.(transpose(D) .- D) .< tol
+        mask = abs.(transpose(D) .- D) .< vtol
         Δgauge = norm(view(VdΔV, mask), Inf)
-        Δgauge < tol ||
+        Δgauge < gtol ||
             @warn "`eig` cotangents sensitive to gauge choice: (|Δgauge| = $Δgauge)"
 
-        VdΔV .*= conj.(safe_inv.(transpose(D) .- D, tol))
+        VdΔV .*= conj.(safe_inv.(transpose(D) .- D, vtol))
 
         if !(ΔD isa AbstractZero)
             view(VdΔV, diagind(VdΔV)) .+= ΔD
@@ -345,7 +347,8 @@ end
 
 function eigh_pullback!(ΔA::AbstractMatrix, D::AbstractVector, V::AbstractMatrix, ΔD, ΔV;
                         tol::Real=default_pullback_gaugetol(D))
-
+    vtol = tol * norm(D, Inf)
+    gtol = tol * max(norm(D, Inf), one(norm(D, Inf)))
     # Basic size checks and determination
     n = LinearAlgebra.checksquare(V)
     n == length(D) || throw(DimensionMismatch())
@@ -354,12 +357,12 @@ function eigh_pullback!(ΔA::AbstractMatrix, D::AbstractVector, V::AbstractMatri
         VdΔV = V' * ΔV
         aVdΔV = rmul!(VdΔV - VdΔV', 1 / 2)
 
-        mask = abs.(D' .- D) .< tol
+        mask = abs.(D' .- D) .< vtol
         Δgauge = norm(view(aVdΔV, mask))
-        Δgauge < tol ||
+        Δgauge < gtol ||
             @warn "`eigh` cotangents sensitive to gauge choice: (|Δgauge| = $Δgauge)"
 
-        aVdΔV .*= safe_inv.(D' .- D, tol)
+        aVdΔV .*= safe_inv.(D' .- D, vtol)
 
         if !(ΔD isa AbstractZero)
             view(aVdΔV, diagind(aVdΔV)) .+= real.(ΔD)
@@ -375,8 +378,10 @@ end
 
 function qr_pullback!(ΔA::AbstractMatrix, Q::AbstractMatrix, R::AbstractMatrix, ΔQ, ΔR;
                       tol::Real=default_pullback_gaugetol(R))
+    vtol = tol * norm(R, Inf)
+    gtol = tol * max(norm(R, Inf), one(norm(R, Inf)))
     Rd = view(R, diagind(R))
-    p = something(findlast(≥(tol) ∘ abs, Rd), 0)
+    p = something(findlast(≥(vtol) ∘ abs, Rd), 0)
     m, n = size(R)
 
     Q1 = view(Q, :, 1:p)
@@ -416,7 +421,7 @@ function qr_pullback!(ΔA::AbstractMatrix, Q::AbstractMatrix, R::AbstractMatrix,
         ΔQ2 = view(ΔQ, :, (p + 1):m)
         Q1dΔQ2 = Q1' * ΔQ2
         Δgauge = norm(mul!(copy(ΔQ2), Q1, Q1dΔQ2, -1, 1), Inf)
-        Δgauge < tol ||
+        Δgauge < gtol ||
             @warn "`qr` cotangents sensitive to gauge choice: (|Δgauge| = $Δgauge)"
         mul!(ΔA1, Q2, Q1dΔQ2', -1, 1)
     end
@@ -426,8 +431,10 @@ end
 
 function lq_pullback!(ΔA::AbstractMatrix, L::AbstractMatrix, Q::AbstractMatrix, ΔL, ΔQ;
                       tol::Real=default_pullback_gaugetol(L))
+    vtol = tol * norm(L, Inf)
+    gtol = tol * max(norm(L, Inf), one(norm(L, Inf)))
     Ld = view(L, diagind(L))
-    p = something(findlast(≥(tol) ∘ abs, Ld), 0)
+    p = something(findlast(≥(vtol) ∘ abs, Ld), 0)
     m, n = size(L)
 
     L1 = view(L, :, 1:p)
@@ -467,7 +474,7 @@ function lq_pullback!(ΔA::AbstractMatrix, L::AbstractMatrix, Q::AbstractMatrix,
         ΔQ2 = view(ΔQ, (p + 1):n, :)
         ΔQ2Q1d = ΔQ2 * Q1'
         Δgauge = norm(mul!(copy(ΔQ2), ΔQ2Q1d, Q1, -1, 1))
-        Δgauge < tol ||
+        Δgauge < gtol ||
             @warn "`lq` cotangents sensitive to gauge choice: (|Δgauge| = $Δgauge)"
         mul!(ΔA1, ΔQ2Q1d', Q2, -1, 1)
     end
@@ -477,5 +484,5 @@ end
 
 function default_pullback_gaugetol(a)
     n = norm(a, Inf)
-    return eps(eltype(n))^(3 / 4) * max(n, one(n))
+    return eps(eltype(n))^(3 / 4)
 end
