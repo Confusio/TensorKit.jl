@@ -62,7 +62,37 @@ end
 function _compute_truncdim(Σdata, trunc::TruncationDimension, p=2)
     I = keytype(Σdata)
     truncdim = SectorDict{I,Int}(c => length(v) for (c, v) in Σdata)
-    while sum(dim(c) * d for (c, d) in truncdim) > trunc.dim
+    S = []
+    for (c, v) in Σdata
+        for i in 1:dim(c)
+            push!(S, v)
+        end
+    end
+
+    S = sort(vcat(S...); by=x -> -x)
+
+    n = trunc.dim
+
+    cutoff = eps(scalartype(S))
+    deg_threshold = 1.0 - sqrt(cutoff)
+    n_above_cutoff = count(>=(cutoff), S / S[1])
+    n = Int(min(n, n_above_cutoff))
+    if n > 0 && n < length(S)
+
+        # 从初始截断点开始向后检查
+        last_index = n
+        for i in n:(length(S) - 1)
+            # 如果下一个奇异值与当前奇异值非常接近
+            if S[i + 1] >= S[i] * deg_threshold
+                last_index = i + 1
+            else
+                # 一旦发现差异足够大的相邻奇异值，停止扩展
+                break
+            end
+        end
+        n = last_index
+    end
+    while sum(dim(c) * d for (c, d) in truncdim) > n
         cmin = _findnexttruncvalue(Σdata, truncdim, p)
         isnothing(cmin) && break
         truncdim[cmin] -= 1
